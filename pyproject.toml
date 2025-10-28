@@ -9,10 +9,10 @@ description = "A comprehensive tool for immunogenicity modulation of virus-like 
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Chufan Wang", email = "wcf1112@sjtu.edu.cn"}
+    {name = "Chufan Wang", email = "wcf231229@163.com"}
 ]
 maintainers = [
-    {name = "Chufan Wang", email = "wcf1112@sjtu.edu.cn"}
+    {name = "Chufan Wang", email = "wcf231229@163.com"}
 ]
 keywords = ["bioinformatics", "immunogenicity", "protein", "epitope", "MHC", "structure prediction"]
 classifiers = [

@@ -15,7 +15,7 @@ Date: 2025
 
 __version__ = "1.0.0"
 __author__ = "Chufan Wang"
-__email__ = "wcf1112@sjtu.edu.cn"
+__email__ = "wcf231229@163.com"
 
 from .immunogenicity_optimization_pipeline import ImmunogenicityOptimizer, PipelineConfig, ImmunogenicityMode
 

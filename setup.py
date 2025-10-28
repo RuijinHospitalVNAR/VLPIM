@@ -20,7 +20,7 @@ setup(
     name="vlpim",
     version="1.0.0",
     author="Chufan Wang",
-    author_email="wcf1112@sjtu.edu.cn",
+    author_email="wcf231229@163.com",
     description="A comprehensive tool for immunogenicity modulation of virus-like particles",
     long_description=read_readme(),
     long_description_content_type="text/markdown",

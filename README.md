@@ -330,7 +330,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 📧 Email: wcf1112@sjtu.edu.cn
+- 📧 Email: wcf231229@163.com
 - 🐛 Issues: [GitHub Issues](https://github.com/RuijinHospitalVNAR/VLPIM/issues)
 - 📖 Documentation: [docs/](docs/)
 - 🤝 Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)

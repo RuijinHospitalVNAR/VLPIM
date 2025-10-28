@@ -348,5 +348,5 @@ rm -rf results/temp/
 
 ### 联系支持
 
-- 邮箱：wcf1112@sjtu.edu.cn
+- 邮箱：wcf231229@163.com
 - GitHub：@chufan

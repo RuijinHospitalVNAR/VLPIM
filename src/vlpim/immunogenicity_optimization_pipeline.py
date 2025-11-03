@@ -33,8 +33,8 @@ try:
     from .tools.epitope_predictor import identify_epitopes
     from .tools.protein_mpnn_wrapper import generate_mutants
     from .tools.netmhcii_runner import evaluate_mhc_affinity
-    from .tools.alphafold3_runner import predict_structure_and_score
-    from .tools.rosetta_interface_analyzer import analyze_interface
+    from .tools.alphafold3_wrapper import predict_structure
+    from .tools.rosetta_wrapper import analyze_interface
 except ImportError as e:
     logging.error(f"Failed to import required tools: {e}")
     logging.error("Please ensure all required tools are available in the tools/ directory")
@@ -654,25 +654,30 @@ class ImmunogenicityOptimizer:
             self.logger.info(f"Selected {len(top_candidates)} top candidates for structure prediction")
             
             # Predict structures using AlphaFold3
-            structure_results = predict_structure_and_score(
-                top_candidates,
-                rmsd_threshold=self.config.rmsd_threshold
-            )
+            # Note: This is a placeholder - actual implementation needed
+            # structure_results = predict_structure_and_score(
+            #     top_candidates,
+            #     rmsd_threshold=self.config.rmsd_threshold
+            # )
+            self.logger.warning("Structure prediction not yet implemented - skipping")
+            structure_results = top_candidates
             
             # Perform interface analysis if enabled
-            if self.config.interface_analysis:
-                self.logger.info("Step 5: Performing interface analysis with Rosetta...")
-                interface_results = analyze_interface(
-                    structure_results,
-                    dg_dsasa_threshold=self.config.dg_dsasa_threshold,
-                    buns_threshold=self.config.buns_threshold,
-                    packstat_threshold=self.config.packstat_threshold
-                )
-                
-                # Rank candidates based on RMSD, dG/dSASA, packstat, BUNS
-                final_results = self._rank_candidates(interface_results)
-            else:
-                final_results = structure_results
+            # Note: This is a placeholder - actual implementation needed
+            # if self.config.interface_analysis:
+            #     self.logger.info("Step 5: Performing interface analysis with Rosetta...")
+            #     interface_results = analyze_interface(
+            #         structure_results,
+            #         dg_dsasa_threshold=self.config.dg_dsasa_threshold,
+            #         buns_threshold=self.config.buns_threshold,
+            #         packstat_threshold=self.config.packstat_threshold
+            #     )
+            #     
+            #     # Rank candidates based on RMSD, dG/dSASA, packstat, BUNS
+            #     final_results = self._rank_candidates(interface_results)
+            # else:
+            final_results = structure_results
+            self.logger.info("Skipping interface analysis (not yet implemented)")
             
             # Save final results
             final_file = os.path.join(self.config.output_dir, "final_ranked_candidates.csv")

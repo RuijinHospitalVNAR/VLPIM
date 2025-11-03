@@ -30,7 +30,6 @@ import numpy as np
 
 # Import custom tools (assuming they exist in tools/ directory)
 try:
-    from .tools.epitope_predictor import identify_epitopes
     from .tools.protein_mpnn_wrapper import generate_mutants
     from .tools.netmhcii_runner import evaluate_mhc_affinity
     from .tools.alphafold3_wrapper import predict_structure
@@ -309,37 +308,11 @@ class ImmunogenicityOptimizer:
         try:
             from .tools.netmhcii_runner import predict_epitopes_with_netmhcii
             
-            # Use configured HLA alleles or default
-            hla_alleles = self.config.hla_alleles if self.config.hla_alleles else [
-                "HLA-DQA10102-DQB10501", "HLA-DQA10102-DQB10602", "HLA-DQA10102-DQB10604",
-                "HLA-DQA10103-DQB10501", "HLA-DQA10103-DQB10603", "HLA-DQA10201-DQB10201",
-                "HLA-DQA10201-DQB10202", "HLA-DQA10401-DQB10301", "HLA-DQA10501-DQB10201",
-                "HLA-DQA10501-DQB10301", "HLA-DQA10505-DQB10301",
-                "DRB1_0101", "DRB1_0102", "DRB1_0103", "DRB1_0301", "DRB1_0302",
-                "DRB1_0401", "DRB1_0402", "DRB1_0403", "DRB1_0404", "DRB1_0405",
-                "DRB1_0407", "DRB1_0408", "DRB1_0701", "DRB1_0801", "DRB1_0802",
-                "DRB1_0803", "DRB1_0804", "DRB1_0901", "DRB1_1001", "DRB1_1101",
-                "DRB1_1102", "DRB1_1104", "DRB1_1201", "DRB1_1202", "DRB1_1301",
-                "DRB1_1302", "DRB1_1303", "DRB1_1401", "DRB1_1402", "DRB1_1454",
-                "DRB1_1501", "DRB1_1502", "DRB1_1503", "DRB1_1601",
-                "DRB3_0101", "DRB3_0202", "DRB3_0301",
-                "DRB4_0101", "DRB4_0103",
-                "DRB5_0101", "DRB5_0202",
-                "HLA-DPA10103-DPB10101", "HLA-DPA10103-DPB10201", "HLA-DPA10103-DPB10301",
-                "HLA-DPA10103-DPB10401", "HLA-DPA10103-DPB10402", "HLA-DPA10103-DPB10501",
-                "HLA-DPA10103-DPB10601", "HLA-DPA10103-DPB11001", "HLA-DPA10103-DPB11101",
-                "HLA-DPA10103-DPB11401", "HLA-DPA10103-DPB11501", "HLA-DPA10103-DPB11601",
-                "HLA-DPA10103-DPB11701", "HLA-DPA10103-DPB12001", "HLA-DPA10103-DPB12301",
-                "HLA-DPA10201-DPB10101", "HLA-DPA10201-DPB10301", "HLA-DPA10201-DPB10401",
-                "HLA-DPA10201-DPB10901", "HLA-DPA10201-DPB11001", "HLA-DPA10201-DPB11101",
-                "HLA-DPA10201-DPB11301", "HLA-DPA10201-DPB11401", "HLA-DPA10201-DPB11701",
-                "HLA-DPA10202-DPB10202", "HLA-DPA10202-DPB10501", "HLA-DPA10202-DPB11901"
-            ]
-            
+            # Use configured HLA alleles (default set in PipelineConfig.__post_init__)
             # Use NetMHCIIpan to predict epitopes
             epitope_df = predict_epitopes_with_netmhcii(
                 self.config.fasta_path, 
-                hla_alleles, 
+                self.config.hla_alleles, 
                 self.config.output_dir
             )
             

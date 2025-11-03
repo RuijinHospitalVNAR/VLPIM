@@ -82,14 +82,39 @@ class PipelineConfig:
     # Scoring parameters
     neutral_score: float = 50.0
     
+    # Epitope selection parameters
+    epitopes_number: int = 10
+    epitope_length: int = 15  # Target epitope length (9-15 aa), extend from core if needed
+    
     def __post_init__(self):
         """Initialize default values after object creation."""
         if self.temperatures is None:
             self.temperatures = [0.1, 0.3, 0.5]
         if self.hla_alleles is None:
             self.hla_alleles = [
-                "DRB1*01:01", "DRB1*03:01", "DRB1*04:01", "DRB1*07:01",
-                "DRB1*08:01", "DRB1*11:01", "DRB1*13:01", "DRB1*15:01"
+                "HLA-DQA10102-DQB10501", "HLA-DQA10102-DQB10602", "HLA-DQA10102-DQB10604",
+                "HLA-DQA10103-DQB10501", "HLA-DQA10103-DQB10603", "HLA-DQA10201-DQB10201",
+                "HLA-DQA10201-DQB10202", "HLA-DQA10401-DQB10301", "HLA-DQA10501-DQB10201",
+                "HLA-DQA10501-DQB10301", "HLA-DQA10505-DQB10301",
+                "DRB1_0101", "DRB1_0102", "DRB1_0103", "DRB1_0301", "DRB1_0302",
+                "DRB1_0401", "DRB1_0402", "DRB1_0403", "DRB1_0404", "DRB1_0405",
+                "DRB1_0407", "DRB1_0408", "DRB1_0701", "DRB1_0801", "DRB1_0802",
+                "DRB1_0803", "DRB1_0804", "DRB1_0901", "DRB1_1001", "DRB1_1101",
+                "DRB1_1102", "DRB1_1104", "DRB1_1201", "DRB1_1202", "DRB1_1301",
+                "DRB1_1302", "DRB1_1303", "DRB1_1401", "DRB1_1402", "DRB1_1454",
+                "DRB1_1501", "DRB1_1502", "DRB1_1503", "DRB1_1601",
+                "DRB3_0101", "DRB3_0202", "DRB3_0301",
+                "DRB4_0101", "DRB4_0103",
+                "DRB5_0101", "DRB5_0202",
+                "HLA-DPA10103-DPB10101", "HLA-DPA10103-DPB10201", "HLA-DPA10103-DPB10301",
+                "HLA-DPA10103-DPB10401", "HLA-DPA10103-DPB10402", "HLA-DPA10103-DPB10501",
+                "HLA-DPA10103-DPB10601", "HLA-DPA10103-DPB11001", "HLA-DPA10103-DPB11101",
+                "HLA-DPA10103-DPB11401", "HLA-DPA10103-DPB11501", "HLA-DPA10103-DPB11601",
+                "HLA-DPA10103-DPB11701", "HLA-DPA10103-DPB12001", "HLA-DPA10103-DPB12301",
+                "HLA-DPA10201-DPB10101", "HLA-DPA10201-DPB10301", "HLA-DPA10201-DPB10401",
+                "HLA-DPA10201-DPB10901", "HLA-DPA10201-DPB11001", "HLA-DPA10201-DPB11101",
+                "HLA-DPA10201-DPB11301", "HLA-DPA10201-DPB11401", "HLA-DPA10201-DPB11701",
+                "HLA-DPA10202-DPB10202", "HLA-DPA10202-DPB10501", "HLA-DPA10202-DPB11901"
             ]
 
 
@@ -162,10 +187,10 @@ class ImmunogenicityOptimizer:
     
     def compute_immunogenicity_scores(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Compute immunogenicity scores based on MHC-II binding ranks.
+        Compute immunogenicity scores based on MHC-II binding IC50 values.
         
         Args:
-            df: DataFrame containing MHC-II binding rank columns
+            df: DataFrame containing MHC-II binding IC50 columns (IC50_*)
             
         Returns:
             DataFrame with added score columns
@@ -180,30 +205,30 @@ class ImmunogenicityOptimizer:
         mode = self.config.mode.value
         
         for col in df.columns:
-            if col.startswith('Rank_'):
-                allele = col.replace('Rank_', '')
-                min_rank, max_rank = df[col].min(), df[col].max()
+            if col.startswith('IC50_'):
+                allele = col.replace('IC50_', '')
+                min_ic50, max_ic50 = df[col].min(), df[col].max()
                 
                 # Avoid division by zero
-                if max_rank == min_rank:
+                if max_ic50 == min_ic50:
                     df[f'Score_{allele}'] = self.config.neutral_score
-                    self.logger.warning(f"Identical ranks for {allele}, using neutral score")
+                    self.logger.warning(f"Identical IC50 for {allele}, using neutral score")
                 else:
                     if mode == 'reduce':
-                        # Lower ranks (stronger binding) get lower scores for reduction
-                        df[f'Score_{allele}'] = 100 - ((df[col] - min_rank) / (max_rank - min_rank)) * 100
+                        # Lower IC50 (stronger binding) get lower scores for reduction
+                        df[f'Score_{allele}'] = 100 - ((df[col] - min_ic50) / (max_ic50 - min_ic50)) * 100
                     else:  # enhance
-                        # Lower ranks (stronger binding) get higher scores for enhancement
-                        df[f'Score_{allele}'] = ((df[col] - min_rank) / (max_rank - min_rank)) * 100
+                        # Lower IC50 (stronger binding) get higher scores for enhancement
+                        df[f'Score_{allele}'] = ((df[col] - min_ic50) / (max_ic50 - min_ic50)) * 100
                 
                 score_columns.append(f'Score_{allele}')
         
-        # Add overall immunogenicity score
+        # Add overall immunogenicity score (sum across alleles)
         if score_columns:
-            df['Overall_Immunogenicity_Score'] = df[score_columns].mean(axis=1)
+            df['Overall_Immunogenicity_Score'] = df[score_columns].sum(axis=1)
             self.logger.info(f"Computed scores for {len(score_columns)} alleles")
         else:
-            self.logger.warning("No rank columns found for scoring")
+            self.logger.warning("No IC50 columns found for scoring")
         
         return df
     
@@ -225,6 +250,15 @@ class ImmunogenicityOptimizer:
             
             if epitope_df.empty:
                 raise ValueError("No epitopes available")
+            
+            # Filter and select epitopes based on binding strength
+            if not (self.config.epitopes_path and os.path.exists(self.config.epitopes_path)):
+                # Only filter if we predicted with NetMHCIIpan
+                epitope_df = self._filter_epitopes_by_binding(epitope_df)
+                self.logger.info(f"After filtering: {len(epitope_df)} epitopes selected")
+            
+            # Extend core sequences to target length
+            epitope_df = self._extend_core_sequences(epitope_df)
             
             # Save results
             epitope_file = os.path.join(self.config.output_dir, "epitope_predictions.csv")
@@ -256,15 +290,50 @@ class ImmunogenicityOptimizer:
             self.logger.error(f"Failed to load user epitopes: {e}")
             raise
     
+    def _get_sequence_length(self) -> int:
+        """Get sequence length from FASTA file."""
+        try:
+            seq_length = 0
+            with open(self.config.fasta_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('>'):
+                        seq_length += len(line)
+            return seq_length
+        except Exception as e:
+            self.logger.warning(f"Failed to read sequence length: {e}")
+            raise
+    
     def _predict_epitopes_with_netmhcii(self) -> pd.DataFrame:
         """Predict epitopes using NetMHCIIpan."""
         try:
             from .tools.netmhcii_runner import predict_epitopes_with_netmhcii
             
-            # Default HLA alleles
-            hla_alleles = [
-                "DRB1*01:01", "DRB1*03:01", "DRB1*04:01", "DRB1*07:01",
-                "DRB1*08:01", "DRB1*11:01", "DRB1*13:01", "DRB1*15:01"
+            # Use configured HLA alleles or default
+            hla_alleles = self.config.hla_alleles if self.config.hla_alleles else [
+                "HLA-DQA10102-DQB10501", "HLA-DQA10102-DQB10602", "HLA-DQA10102-DQB10604",
+                "HLA-DQA10103-DQB10501", "HLA-DQA10103-DQB10603", "HLA-DQA10201-DQB10201",
+                "HLA-DQA10201-DQB10202", "HLA-DQA10401-DQB10301", "HLA-DQA10501-DQB10201",
+                "HLA-DQA10501-DQB10301", "HLA-DQA10505-DQB10301",
+                "DRB1_0101", "DRB1_0102", "DRB1_0103", "DRB1_0301", "DRB1_0302",
+                "DRB1_0401", "DRB1_0402", "DRB1_0403", "DRB1_0404", "DRB1_0405",
+                "DRB1_0407", "DRB1_0408", "DRB1_0701", "DRB1_0801", "DRB1_0802",
+                "DRB1_0803", "DRB1_0804", "DRB1_0901", "DRB1_1001", "DRB1_1101",
+                "DRB1_1102", "DRB1_1104", "DRB1_1201", "DRB1_1202", "DRB1_1301",
+                "DRB1_1302", "DRB1_1303", "DRB1_1401", "DRB1_1402", "DRB1_1454",
+                "DRB1_1501", "DRB1_1502", "DRB1_1503", "DRB1_1601",
+                "DRB3_0101", "DRB3_0202", "DRB3_0301",
+                "DRB4_0101", "DRB4_0103",
+                "DRB5_0101", "DRB5_0202",
+                "HLA-DPA10103-DPB10101", "HLA-DPA10103-DPB10201", "HLA-DPA10103-DPB10301",
+                "HLA-DPA10103-DPB10401", "HLA-DPA10103-DPB10402", "HLA-DPA10103-DPB10501",
+                "HLA-DPA10103-DPB10601", "HLA-DPA10103-DPB11001", "HLA-DPA10103-DPB11101",
+                "HLA-DPA10103-DPB11401", "HLA-DPA10103-DPB11501", "HLA-DPA10103-DPB11601",
+                "HLA-DPA10103-DPB11701", "HLA-DPA10103-DPB12001", "HLA-DPA10103-DPB12301",
+                "HLA-DPA10201-DPB10101", "HLA-DPA10201-DPB10301", "HLA-DPA10201-DPB10401",
+                "HLA-DPA10201-DPB10901", "HLA-DPA10201-DPB11001", "HLA-DPA10201-DPB11101",
+                "HLA-DPA10201-DPB11301", "HLA-DPA10201-DPB11401", "HLA-DPA10201-DPB11701",
+                "HLA-DPA10202-DPB10202", "HLA-DPA10202-DPB10501", "HLA-DPA10202-DPB11901"
             ]
             
             # Use NetMHCIIpan to predict epitopes
@@ -280,6 +349,230 @@ class ImmunogenicityOptimizer:
         except Exception as e:
             self.logger.error(f"NetMHCIIpan prediction failed: {e}")
             raise
+    
+    def _filter_epitopes_by_binding(self, epitope_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter epitopes based on strong/weak binding counts per Core sequence.
+        
+        Criteria:
+        - Strong binding: %Rank_EL <= 1.00%
+        - Weak binding: 1.00% < %Rank_EL <= 5.00%
+        - Number of strong binding = strong + weak binding counts per Core
+        
+        For reduce mode: select top N cores with highest number of strong binding
+        For enhance mode: select bottom N cores with lowest number of strong binding
+        
+        Args:
+            epitope_df: DataFrame with epitope predictions
+            
+        Returns:
+            Filtered DataFrame with selected epitopes
+        """
+        self.logger.info("Filtering epitopes based on binding strength...")
+        
+        if epitope_df.empty:
+            return epitope_df
+        
+        # Determine which rank column to use
+        rank_col = None
+        if 'rank_el' in epitope_df.columns:
+            rank_col = 'rank_el'
+            self.logger.info("Using %Rank_EL for binding classification")
+        elif 'rank' in epitope_df.columns:
+            rank_col = 'rank'
+            self.logger.warning("%Rank_EL not available, using BA_Rank instead")
+        else:
+            self.logger.warning("No rank information available, skipping filtering")
+            return epitope_df
+        
+        # Ensure core column exists
+        if 'core' not in epitope_df.columns:
+            if 'sequence' in epitope_df.columns:
+                epitope_df['core'] = epitope_df['sequence']
+                self.logger.info("Core column not found, using sequence as core")
+            else:
+                self.logger.warning("Neither core nor sequence column found, skipping filtering")
+                return epitope_df
+        
+        # Classify binding strength
+        # Strong binding: %Rank <= 1.00%
+        # Weak binding: 1.00% < %Rank <= 5.00%
+        def classify_binding(rank_value):
+            if pd.isna(rank_value):
+                return None
+            if rank_value <= 1.00:
+                return 'strong'
+            elif rank_value <= 5.00:
+                return 'weak'
+            else:
+                return None
+        
+        epitope_df['binding_class'] = epitope_df[rank_col].apply(classify_binding)
+        
+        # Count strong and weak bindings per core
+        core_binding_counts = []
+        for core in epitope_df['core'].unique():
+            core_data = epitope_df[epitope_df['core'] == core]
+            strong_count = len(core_data[core_data['binding_class'] == 'strong'])
+            weak_count = len(core_data[core_data['binding_class'] == 'weak'])
+            number_of_strong_binding = strong_count + weak_count
+            
+            core_binding_counts.append({
+                'core': core,
+                'strong_count': strong_count,
+                'weak_count': weak_count,
+                'number_of_strong_binding': number_of_strong_binding
+            })
+        
+        core_counts_df = pd.DataFrame(core_binding_counts)
+        
+        # Sort by number_of_strong_binding
+        core_counts_df = core_counts_df.sort_values(
+            'number_of_strong_binding',
+            ascending=False
+        ).reset_index(drop=True)
+        
+        self.logger.info(f"Core sequences ranked: {len(core_counts_df)} unique cores")
+        self.logger.info(f"Top 5 cores by binding count: {core_counts_df.head(5)['core'].tolist()}")
+        
+        # Determine effective number of epitopes to select based on sequence length
+        # To prevent overlapping mutation regions, limit epitopes for short sequences
+        try:
+            # Read sequence length from FASTA
+            seq_length = self._get_sequence_length()
+            if seq_length < 200:
+                # For sequences shorter than 200 amino acids, limit to maximum 3 epitopes
+                n_effective = min(self.config.epitopes_number, 3)
+                self.logger.info(f"Sequence length ({seq_length} aa) < 200, limiting epitopes to {n_effective}")
+            else:
+                n_effective = self.config.epitopes_number
+        except Exception as e:
+            self.logger.warning(f"Could not determine sequence length: {e}, using user-defined value")
+            n_effective = self.config.epitopes_number
+        
+        # Select top or bottom N cores based on mode
+        if self.config.mode == ImmunogenicityMode.REDUCE:
+            # Reduce mode: select cores with highest binding (top N)
+            selected_cores = core_counts_df.head(n_effective)['core'].tolist()
+            self.logger.info(f"Reduce mode: selecting top {n_effective} cores with highest binding")
+        else:  # ENHANCE
+            # Enhance mode: select cores with lowest binding (bottom N)
+            selected_cores = core_counts_df.tail(n_effective)['core'].tolist()
+            self.logger.info(f"Enhance mode: selecting bottom {n_effective} cores with lowest binding")
+        
+        # Filter epitope_df to only include selected cores
+        filtered_df = epitope_df[epitope_df['core'].isin(selected_cores)].copy()
+        
+        # Add binding count information to filtered epitopes
+        if not filtered_df.empty:
+            core_counts_dict = dict(zip(
+                core_counts_df['core'],
+                core_counts_df['number_of_strong_binding']
+            ))
+            filtered_df['number_of_strong_binding'] = filtered_df['core'].map(core_counts_dict)
+        
+        self.logger.info(f"Selected {len(selected_cores)} cores, resulting in {len(filtered_df)} epitopes")
+        
+        return filtered_df
+    
+    def _extend_core_sequences(self, epitope_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Extend Core sequences to target epitope_length using amino acids from the original VLP sequence.
+        
+        Extension strategy:
+        - Target length: epitope_length (default 15, range 9-15 aa)
+        - Maximum forward extension (toward N-terminal): 2 amino acids
+        - Maximum backward extension (toward C-terminal): 4 amino acids
+        - Priority: extend forward first (up to 2 aa), then backward (up to 4 aa)
+        - All extended amino acids come from the original input VLP sequence
+        - Example: 9-mer core -> forward 2 aa + backward 4 aa -> 15-mer
+        
+        Args:
+            epitope_df: DataFrame with core sequences and positions
+            
+        Returns:
+            DataFrame with extended sequences and updated positions
+        """
+        self.logger.info(f"Extending core sequences to target length {self.config.epitope_length}...")
+        
+        if epitope_df.empty:
+            return epitope_df
+        
+        # Get full protein sequence from original VLP FASTA file
+        try:
+            full_sequence = self._get_full_sequence()
+            seq_length = len(full_sequence)
+        except Exception as e:
+            self.logger.warning(f"Could not read full sequence: {e}, skipping extension")
+            return epitope_df
+        
+        # Validate target length
+        if self.config.epitope_length < 9 or self.config.epitope_length > 15:
+            self.logger.warning(f"Invalid epitope_length {self.config.epitope_length}, must be 9-15. Using 15.")
+            target_length = 15
+        else:
+            target_length = self.config.epitope_length
+        
+        extended_sequences = []
+        extended_starts = []
+        extended_ends = []
+        
+        for _, row in epitope_df.iterrows():
+            core_seq = row.get('core', row.get('sequence', ''))
+            core_start = int(row.get('start', 1))
+            core_end = int(row.get('end', core_start + len(core_seq) - 1))
+            
+            core_len = len(core_seq)
+            
+            # If core is already at or above target length, keep as is
+            if core_len >= target_length:
+                extended_sequences.append(core_seq)
+                extended_starts.append(core_start)
+                extended_ends.append(core_end)
+                continue
+            
+            # Calculate extension needed
+            extension_needed = target_length - core_len
+            max_forward = min(2, extension_needed)
+            max_backward = min(4, extension_needed - max_forward)
+            
+            # Calculate new start and end positions (1-based)
+            new_start = max(1, core_start - max_forward)
+            new_end = min(seq_length, core_end + max_backward)
+            
+            # Extract extended sequence from full sequence
+            extended_seq = full_sequence[new_start - 1:new_end]
+            
+            extended_sequences.append(extended_seq)
+            extended_starts.append(new_start)
+            extended_ends.append(new_end)
+            
+            self.logger.debug(
+                f"Extended core {core_seq} ({core_len}aa) at [{core_start}-{core_end}] "
+                f"to {extended_seq} ({len(extended_seq)}aa) at [{new_start}-{new_end}]"
+            )
+        
+        # Update DataFrame with extended sequences
+        result_df = epitope_df.copy()
+        result_df['sequence'] = extended_sequences
+        result_df['start'] = extended_starts
+        result_df['end'] = extended_ends
+        
+        self.logger.info(f"Extended {len(result_df)} epitope sequences")
+        
+        return result_df
+    
+    def _get_full_sequence(self) -> str:
+        """Get full protein sequence from FASTA file."""
+        sequence = ""
+        with open(self.config.fasta_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('>'):
+                    sequence += line
+        if not sequence:
+            raise ValueError("Empty sequence read from FASTA file")
+        return sequence
     
     def generate_mutant_sequences(self, epitope_df: pd.DataFrame) -> List[str]:
         """Generate mutant sequences using ProteinMPNN."""
@@ -501,7 +794,9 @@ def create_config_from_args(args) -> PipelineConfig:
         interface_analysis=args.interface_analysis,
         dg_dsasa_threshold=args.dg_dsasa_threshold,
         buns_threshold=args.buns_threshold,
-        packstat_threshold=args.packstat_threshold
+        packstat_threshold=args.packstat_threshold,
+        epitopes_number=args.epitopes_number,
+        epitope_length=args.epitope_length
     )
 
 
@@ -538,6 +833,12 @@ Examples:
     # Optional user input arguments
     parser.add_argument('--epitopes', type=str,
                        help='Optional CSV file containing user-provided epitopes (columns: sequence, start, end)')
+    
+    # Epitope selection parameters
+    parser.add_argument('--epitopes-number', type=int, default=10,
+                       help='Number of epitopes to select based on binding strength (default: 10)')
+    parser.add_argument('--epitope-length', type=int, default=15,
+                       help='Target epitope length (9-15 aa), extends from core if needed (default: 15)')
     
     # Optional arguments
     parser.add_argument('--output-dir', type=str, default='results',

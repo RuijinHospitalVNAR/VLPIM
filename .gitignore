@@ -142,6 +142,15 @@ tmp/
 # External tools (if mounted)
 tools/external/
 
+# Web service (not part of core VLPIM)
+web_service/
+
+# Temporary scripts
+run_*.py
+show_*.py
+check_*.py
+extract_*.py
+
 # IDE files
 .vscode/
 .idea/

@@ -96,7 +96,11 @@ def predict_epitopes_with_netmhcii(fasta_path: str, hla_alleles: List[str], outp
 
 
 def _parse_netmhcii_output(output_file: str) -> pd.DataFrame:
-    """Parse NetMHCIIpan-4.3 output file based on official format."""
+    """Parse NetMHCIIpan-4.3 output file based on official format.
+    
+    Expected format: Pos Peptide ID Allele Core %Rank_EL BA_Rank BA_IC50 BA_Raw Score
+    Or alternative: Pos Peptide ID Allele BA_Rank BA_IC50 BA_Raw Score (if Core not available)
+    """
     epitopes = []
     
     try:
@@ -109,17 +113,19 @@ def _parse_netmhcii_output(output_file: str) -> pd.DataFrame:
                 continue
                 
             parts = line.split()
-            if len(parts) >= 8:
-                # Parse NetMHCIIpan-4.3 output format
-                # Format: Pos Peptide ID Allele BA_Rank BA_IC50 BA_Raw Score
+            # Try to parse format with Core and %Rank_EL (9+ columns)
+            if len(parts) >= 9:
                 try:
                     pos = int(parts[0])
                     peptide = parts[1]
-                    allele = parts[2]
-                    ba_rank = float(parts[3])
-                    ba_ic50 = float(parts[4])
-                    ba_raw = float(parts[5])
-                    score = float(parts[6])
+                    seq_id = parts[2] if len(parts) > 2 else ""
+                    allele = parts[3]
+                    core = parts[4] if len(parts) > 4 else ""
+                    rank_el = float(parts[5]) if len(parts) > 5 else None
+                    ba_rank = float(parts[6]) if len(parts) > 6 else None
+                    ba_ic50 = float(parts[7]) if len(parts) > 7 else None
+                    ba_raw = float(parts[8]) if len(parts) > 8 else None
+                    score = float(parts[9]) if len(parts) > 9 else None
                     
                     # Calculate position information
                     start_pos = pos
@@ -127,17 +133,50 @@ def _parse_netmhcii_output(output_file: str) -> pd.DataFrame:
                     
                     epitopes.append({
                         'sequence': peptide,
+                        'core': core if core else peptide,  # Use peptide as core if core not available
                         'start': start_pos,
                         'end': end_pos,
-                        'score': score,
-                        'rank': ba_rank,
+                        'score': score if score is not None else ba_raw if ba_raw is not None else 0.0,
+                        'rank_el': rank_el,  # %Rank_EL
+                        'rank': ba_rank,     # BA_Rank
                         'ic50': ba_ic50,
                         'raw_score': ba_raw,
                         'allele': allele,
+                        'seq_id': seq_id,
                         'method': 'NetMHCIIpan-4.3'
                     })
                 except (ValueError, IndexError) as e:
-                    # Skip malformed lines
+                    # Try alternative format without Core (8 columns)
+                    if len(parts) >= 8:
+                        try:
+                            pos = int(parts[0])
+                            peptide = parts[1]
+                            seq_id = parts[2] if len(parts) > 2 else ""
+                            allele = parts[3]
+                            ba_rank = float(parts[4])
+                            ba_ic50 = float(parts[5])
+                            ba_raw = float(parts[6])
+                            score = float(parts[7])
+                            
+                            start_pos = pos
+                            end_pos = start_pos + len(peptide) - 1
+                            
+                            epitopes.append({
+                                'sequence': peptide,
+                                'core': peptide,  # Use peptide as core when not available
+                                'start': start_pos,
+                                'end': end_pos,
+                                'score': score,
+                                'rank_el': None,  # Not available
+                                'rank': ba_rank,
+                                'ic50': ba_ic50,
+                                'raw_score': ba_raw,
+                                'allele': allele,
+                                'seq_id': seq_id,
+                                'method': 'NetMHCIIpan-4.3'
+                            })
+                        except (ValueError, IndexError):
+                            continue
                     continue
     
     except Exception as e:
@@ -181,19 +220,31 @@ def evaluate_mhc_affinity(mutant_file: str) -> pd.DataFrame:
             'rank': 'mean'
         }).reset_index()
         
-        # Add individual allele scores
-        pivot_df = affinity_df.pivot_table(
-            index='sequence', 
-            columns='allele', 
-            values='rank', 
+        # Add individual allele rank (percentile) scores
+        pivot_rank_df = affinity_df.pivot_table(
+            index='sequence',
+            columns='allele',
+            values='rank',
             fill_value=999
         ).reset_index()
-        
-        # Rename columns to match expected format
-        pivot_df.columns = [f'Rank_{col}' if col != 'sequence' else col for col in pivot_df.columns]
+        # Rename columns to match expected format for rank
+        pivot_rank_df.columns = [f'Rank_{col}' if col != 'sequence' else col for col in pivot_rank_df.columns]
+
+        # Add individual allele IC50 values
+        pivot_ic50_df = affinity_df.pivot_table(
+            index='sequence',
+            columns='allele',
+            values='ic50',
+            fill_value=1e9
+        ).reset_index()
+        # Rename columns to match expected format for IC50
+        pivot_ic50_df.columns = [f'IC50_{col}' if col != 'sequence' else col for col in pivot_ic50_df.columns]
+
+        # Merge rank and IC50 wide tables
+        merged_df = pd.merge(pivot_rank_df, pivot_ic50_df, on='sequence', how='outer')
         
         logger.info("MHC-II evaluation completed")
-        return pivot_df
+        return merged_df
         
     except Exception as e:
         logger.error(f"MHC-II evaluation failed: {e}")

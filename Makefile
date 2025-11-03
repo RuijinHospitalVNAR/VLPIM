@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # VLPIM: A Comprehensive Tool for Immunogenicity Modulation of Virus-like Particles - Makefile
 # Provides convenient commands for common operations
 

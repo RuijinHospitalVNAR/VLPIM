@@ -1,3 +1,4 @@
+<!-- -*- coding: utf-8 -*- -->
 # Contributing to VLPIM
 
 Thank you for your interest in contributing to VLPIM (Variable Length Protein Immunogenicity Modulator)! This document provides guidelines and information for contributors.

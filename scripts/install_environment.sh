@@ -1,4 +1,5 @@
 #!/bin/bash
+# -*- coding: utf-8 -*-
 # VLPIM: A Comprehensive Tool for Immunogenicity Modulation of Virus-like Particles - Setup Script
 # This script sets up the environment and installs dependencies
 

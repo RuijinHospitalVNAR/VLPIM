@@ -1,3 +1,4 @@
+<!-- -*- coding: utf-8 -*- -->
 # Changelog
 
 All notable changes to VLPIM: A Comprehensive Tool for Immunogenicity Modulation of Virus-like Particles will be documented in this file.

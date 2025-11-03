@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Test script for the updated immunogenicity optimization pipeline
 with interface analysis functionality.

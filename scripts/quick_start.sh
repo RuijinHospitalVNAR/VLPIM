@@ -1,4 +1,5 @@
 #!/bin/bash
+# -*- coding: utf-8 -*-
 # Quick Start Script for VLPIM: A Comprehensive Tool for Immunogenicity Modulation of Virus-like Particles
 
 echo "=========================================="

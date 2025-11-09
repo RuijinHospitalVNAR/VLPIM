@@ -16,7 +16,7 @@ import logging
 import subprocess
 import os
 import tempfile
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from pathlib import Path
 
 
@@ -97,93 +97,186 @@ def predict_epitopes_with_netmhcii(fasta_path: str, hla_alleles: List[str], outp
 
 
 def _parse_netmhcii_output(output_file: str) -> pd.DataFrame:
-    """Parse NetMHCIIpan-4.3 output file based on official format.
-    
-    Expected format: Pos Peptide ID Allele Core %Rank_EL BA_Rank BA_IC50 BA_Raw Score
-    Or alternative: Pos Peptide ID Allele BA_Rank BA_IC50 BA_Raw Score (if Core not available)
-    """
-    epitopes = []
+    """Parse NetMHCIIpan-4.3 output file supporting both standard and wide formats."""
+    logger = logging.getLogger(__name__)
     
     try:
         with open(output_file, 'r') as f:
             lines = f.readlines()
-        
-        for line in lines:
-            line = line.strip()
-            if line.startswith('#') or not line:
-                continue
-                
-            parts = line.split()
-            # Try to parse format with Core and %Rank_EL (9+ columns)
-            if len(parts) >= 9:
-                try:
-                    pos = int(parts[0])
-                    peptide = parts[1]
-                    seq_id = parts[2] if len(parts) > 2 else ""
-                    allele = parts[3]
-                    core = parts[4] if len(parts) > 4 else ""
-                    rank_el = float(parts[5]) if len(parts) > 5 else None
-                    ba_rank = float(parts[6]) if len(parts) > 6 else None
-                    ba_ic50 = float(parts[7]) if len(parts) > 7 else None
-                    ba_raw = float(parts[8]) if len(parts) > 8 else None
-                    score = float(parts[9]) if len(parts) > 9 else None
-                    
-                    # Calculate position information
-                    start_pos = pos
-                    end_pos = start_pos + len(peptide) - 1
-                    
-                    epitopes.append({
-                        'sequence': peptide,
-                        'core': core if core else peptide,  # Use peptide as core if core not available
-                        'start': start_pos,
-                        'end': end_pos,
-                        'score': score if score is not None else ba_raw if ba_raw is not None else 0.0,
-                        'rank_el': rank_el,  # %Rank_EL
-                        'rank': ba_rank,     # BA_Rank
-                        'ic50': ba_ic50,
-                        'raw_score': ba_raw,
-                        'allele': allele,
-                        'seq_id': seq_id,
-                        'method': 'NetMHCIIpan-4.3'
-                    })
-                except (ValueError, IndexError) as e:
-                    # Try alternative format without Core (8 columns)
-                    if len(parts) >= 8:
-                        try:
-                            pos = int(parts[0])
-                            peptide = parts[1]
-                            seq_id = parts[2] if len(parts) > 2 else ""
-                            allele = parts[3]
-                            ba_rank = float(parts[4])
-                            ba_ic50 = float(parts[5])
-                            ba_raw = float(parts[6])
-                            score = float(parts[7])
-                            
-                            start_pos = pos
-                            end_pos = start_pos + len(peptide) - 1
-                            
-                            epitopes.append({
-                                'sequence': peptide,
-                                'core': peptide,  # Use peptide as core when not available
-                                'start': start_pos,
-                                'end': end_pos,
-                                'score': score,
-                                'rank_el': None,  # Not available
-                                'rank': ba_rank,
-                                'ic50': ba_ic50,
-                                'raw_score': ba_raw,
-                                'allele': allele,
-                                'seq_id': seq_id,
-                                'method': 'NetMHCIIpan-4.3'
-                            })
-                        except (ValueError, IndexError):
-                            continue
-                    continue
-    
     except Exception as e:
-        logging.getLogger(__name__).error(f"Failed to parse NetMHCIIpan output: {e}")
+        logger.error(f"Failed to read NetMHCIIpan output file: {e}")
         raise
     
+    if not lines:
+        logger.warning("NetMHCIIpan output file is empty")
+        return pd.DataFrame()
+    
+    # Detect wide-table format by looking for HLA allele names in the header
+    is_wide_format = False
+    hla_alleles: List[str] = []
+    
+    for line in lines[:3]:
+        upper_line = line.upper()
+        if ('HLA-' in upper_line) or ('DRB1_' in upper_line) or ('DQA1' in upper_line) or ('DPB' in upper_line):
+            # Potential wide-table header, try to extract allele names separated by tabs
+            parts = [part.strip() for part in line.split('\t') if part.strip()]
+            allele_candidates = [
+                part for part in parts
+                if ('HLA-' in part.upper()) or ('DRB' in part.upper()) or ('DPA' in part.upper()) or ('DQA' in part.upper())
+            ]
+            if allele_candidates:
+                is_wide_format = True
+                hla_alleles = allele_candidates
+                break
+    
+    if is_wide_format:
+        logger.info(f"Detected NetMHCIIpan wide-table format with {len(hla_alleles)} alleles")
+        return _parse_wide_table_format(lines, hla_alleles)
+    
+    logger.info("Detected NetMHCIIpan standard tabular format")
+    return _parse_standard_format(lines)
+
+
+def _parse_wide_table_format(lines: List[str], hla_alleles: List[str]) -> pd.DataFrame:
+    """
+    Parse wide-table NetMHCIIpan format where each allele has grouped columns
+    (Core, Inverted, Score, Rank, Score_BA, nM, Rank_BA).
+    """
+    logger = logging.getLogger(__name__)
+    epitopes: List[Dict[str, Union[str, float, int]]] = []
+    
+    # Identify the start of data (skip comments/empty lines)
+    data_start_idx = 0
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#'):
+            data_start_idx = idx
+            break
+    
+    cols_per_allele = 7
+    data_start_col = 4  # After Pos, Peptide, ID, Target
+    
+    for line in lines[data_start_idx:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        parts = stripped.split('\t')
+        if len(parts) < data_start_col + 1:
+            continue
+        
+        try:
+            pos = int(parts[0])
+        except ValueError:
+            # Header line encountered unexpectedly
+            continue
+        
+        peptide = parts[1]
+        seq_id = parts[2] if len(parts) > 2 else "Sequence"
+        
+        for idx, allele in enumerate(hla_alleles):
+            allele_start_col = data_start_col + idx * cols_per_allele
+            if allele_start_col + 6 >= len(parts):
+                continue
+            
+            def _safe_float(value: str) -> Optional[float]:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+            
+            core = parts[allele_start_col]
+            score = _safe_float(parts[allele_start_col + 2])
+            rank = _safe_float(parts[allele_start_col + 3])
+            score_ba = _safe_float(parts[allele_start_col + 4])
+            nm = _safe_float(parts[allele_start_col + 5])
+            rank_ba = _safe_float(parts[allele_start_col + 6])
+            
+            start_pos = pos
+            end_pos = start_pos + len(peptide) - 1
+            
+            epitopes.append({
+                'sequence': peptide,
+                'core': core if core and core != 'NA' else peptide,
+                'start': start_pos,
+                'end': end_pos,
+                'score': score if score is not None else 0.0,
+                'rank_el': rank,
+                'rank': rank_ba,
+                'ic50': nm,
+                'raw_score': score_ba,
+                'allele': allele,
+                'seq_id': seq_id,
+                'method': 'NetMHCIIpan-4.3'
+            })
+    
+    logger.info(f"Parsed {len(epitopes)} epitope records from wide-table output")
+    return pd.DataFrame(epitopes)
+
+
+def _parse_standard_format(lines: List[str]) -> pd.DataFrame:
+    """Parse standard NetMHCIIpan format."""
+    epitopes: List[Dict[str, Union[str, float, int]]] = []
+    logger = logging.getLogger(__name__)
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('#') or not stripped:
+            continue
+        
+        parts = stripped.split()
+        if len(parts) < 4:
+            continue
+        
+        try:
+            pos = int(parts[0])
+            peptide = parts[1]
+        except (ValueError, IndexError):
+            continue
+        
+        seq_id = parts[2] if len(parts) > 2 else ""
+        allele = parts[3]
+        
+        # Helper to safely convert float
+        def _safe_float(idx: int) -> Optional[float]:
+            try:
+                return float(parts[idx])
+            except (IndexError, ValueError):
+                return None
+        
+        start_pos = pos
+        end_pos = start_pos + len(peptide) - 1
+        
+        if len(parts) >= 10:
+            core = parts[4]
+            rank_el = _safe_float(5)
+            ba_rank = _safe_float(6)
+            ba_ic50 = _safe_float(7)
+            ba_raw = _safe_float(8)
+            score = _safe_float(9)
+        else:
+            core = peptide if len(parts) >= 4 else ""
+            rank_el = None
+            ba_rank = _safe_float(4)
+            ba_ic50 = _safe_float(5)
+            ba_raw = _safe_float(6)
+            score = _safe_float(7)
+        
+        epitopes.append({
+            'sequence': peptide,
+            'core': core if core else peptide,
+            'start': start_pos,
+            'end': end_pos,
+            'score': score if score is not None else (ba_raw if ba_raw is not None else 0.0),
+            'rank_el': rank_el,
+            'rank': ba_rank,
+            'ic50': ba_ic50,
+            'raw_score': ba_raw,
+            'allele': allele,
+            'seq_id': seq_id,
+            'method': 'NetMHCIIpan-4.3'
+        })
+    
+    logger.info(f"Parsed {len(epitopes)} epitope records from standard output")
     return pd.DataFrame(epitopes)
 
 

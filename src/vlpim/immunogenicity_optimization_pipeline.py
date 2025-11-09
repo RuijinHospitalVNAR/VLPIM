@@ -33,7 +33,7 @@ import numpy as np
 try:
     from .tools.protein_mpnn_wrapper import generate_mutants
     from .tools.netmhcii_runner import evaluate_mhc_affinity
-    from .tools.alphafold3_wrapper import predict_structure
+    from .tools.alphafold3_wrapper import predict_structure, calculate_rmsd
     from .tools.rosetta_wrapper import analyze_interface
 except ImportError as e:
     logging.error(f"Failed to import required tools: {e}")
@@ -627,14 +627,34 @@ class ImmunogenicityOptimizer:
             
             self.logger.info(f"Selected {len(top_candidates)} top candidates for structure prediction")
             
-            # Predict structures using AlphaFold3
-            # Note: This is a placeholder - actual implementation needed
-            # structure_results = predict_structure_and_score(
-            #     top_candidates,
-            #     rmsd_threshold=self.config.rmsd_threshold
-            # )
-            self.logger.warning("Structure prediction not yet implemented - skipping")
-            structure_results = top_candidates
+            structure_results = top_candidates.reset_index(drop=True).copy()
+            
+            # Attempt structure prediction if sequences are available
+            if 'sequence' in top_candidates.columns:
+                try:
+                    predicted_structures = predict_structure(
+                        top_candidates['sequence'].tolist(),
+                        self.config.output_dir,
+                        max_candidates=self.config.max_candidates
+                    )
+                    
+                    if not predicted_structures.empty and 'pdb_path' in predicted_structures.columns:
+                        predicted_structures = predicted_structures.reset_index(drop=True)
+                        structure_results = pd.concat([structure_results, predicted_structures], axis=1)
+                        
+                        def _compute_rmsd(pdb_path: Union[str, float]) -> float:
+                            if isinstance(pdb_path, str) and os.path.exists(pdb_path):
+                                return calculate_rmsd(self.config.pdb_path, pdb_path, method='auto')
+                            self.logger.warning(f"PDB path not found for RMSD calculation: {pdb_path}")
+                            return 999.0
+                        
+                        structure_results['RMSD'] = structure_results['pdb_path'].apply(_compute_rmsd)
+                    else:
+                        self.logger.warning("AlphaFold3 returned no PDB paths; skipping RMSD calculation")
+                except Exception as e:
+                    self.logger.warning(f"Structure prediction skipped due to error: {e}")
+            else:
+                self.logger.warning("Sequence column not found in candidates; skipping AlphaFold3 prediction")
             
             # Perform interface analysis if enabled
             # Note: This is a placeholder - actual implementation needed

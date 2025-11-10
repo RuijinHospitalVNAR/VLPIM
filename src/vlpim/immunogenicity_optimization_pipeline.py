@@ -662,13 +662,23 @@ class ImmunogenicityOptimizer:
     def evaluate_mhc_binding(
         self,
         mutant_file: str,
-        seq_id_map: Dict[str, str],
-        mutant_sequence_map: Dict[str, str]
+        seq_id_map: Optional[Dict[str, str]] = None,
+        mutant_sequence_map: Optional[Dict[str, str]] = None
     ) -> pd.DataFrame:
         """Evaluate MHC-II binding affinity."""
         self.logger.info("Step 3: Evaluating MHC-II binding affinity...")
         
         try:
+            if seq_id_map is None or mutant_sequence_map is None:
+                affinity_df = evaluate_mhc_affinity(mutant_file, group_by='sequence')
+                affinity_df = self.compute_immunogenicity_scores(affinity_df)
+                affinity_file = os.path.join(self.config.output_dir, "mhc_binding_scores.csv")
+                affinity_df.to_csv(affinity_file, index=False)
+                
+                self.logger.info(f"Evaluated {len(affinity_df)} sequences for MHC-II binding (legacy mode)")
+                self.logger.info(f"MHC binding scores saved to {affinity_file}")
+                return affinity_df
+            
             affinity_df = evaluate_mhc_affinity(mutant_file, group_by='seq_id')
             
             if affinity_df.empty:

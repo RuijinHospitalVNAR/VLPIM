@@ -79,14 +79,14 @@ class TestImmunogenicityOptimizer(unittest.TestCase):
         """Test immunogenicity score computation for reduction mode."""
         import pandas as pd
         
-        # Create test data
+        # Create test data (lower IC50 -> stronger binding)
         df = pd.DataFrame({
             'sequence_id': ['seq1', 'seq2', 'seq3'],
-            'Rank_DRB1*01:01': [1, 5, 10],
-            'Rank_DRB1*03:01': [2, 4, 8]
+            'IC50_DRB1*01:01': [25.0, 150.0, 400.0],
+            'IC50_DRB1*03:01': [30.0, 180.0, 420.0]
         })
         
-        # Test reduce mode
+        # Test reduce mode (strong binding should yield higher penalty scores)
         result_df = self.optimizer.compute_immunogenicity_scores(df)
         
         # Check that score columns were added
@@ -94,8 +94,8 @@ class TestImmunogenicityOptimizer(unittest.TestCase):
         self.assertIn('Score_DRB1*03:01', result_df.columns)
         self.assertIn('Overall_Immunogenicity_Score', result_df.columns)
         
-        # Check score values (lower ranks should get lower scores in reduce mode)
-        self.assertLess(result_df.loc[0, 'Score_DRB1*01:01'], result_df.loc[2, 'Score_DRB1*01:01'])
+        # Strong binders (seq1) should have higher scores than weak binders (seq3)
+        self.assertGreater(result_df.loc[0, 'Score_DRB1*01:01'], result_df.loc[2, 'Score_DRB1*01:01'])
     
     def test_compute_immunogenicity_scores_enhance(self):
         """Test immunogenicity score computation for enhancement mode."""
@@ -107,11 +107,11 @@ class TestImmunogenicityOptimizer(unittest.TestCase):
         # Create test data
         df = pd.DataFrame({
             'sequence_id': ['seq1', 'seq2', 'seq3'],
-            'Rank_DRB1*01:01': [1, 5, 10],
-            'Rank_DRB1*03:01': [2, 4, 8]
+            'IC50_DRB1*01:01': [25.0, 150.0, 400.0],
+            'IC50_DRB1*03:01': [30.0, 180.0, 420.0]
         })
         
-        # Test enhance mode
+        # Test enhance mode (strong binding should yield lower scores)
         result_df = self.optimizer.compute_immunogenicity_scores(df)
         
         # Check that score columns were added
@@ -119,8 +119,8 @@ class TestImmunogenicityOptimizer(unittest.TestCase):
         self.assertIn('Score_DRB1*03:01', result_df.columns)
         self.assertIn('Overall_Immunogenicity_Score', result_df.columns)
         
-        # Check score values (lower ranks should get higher scores in enhance mode)
-        self.assertGreater(result_df.loc[0, 'Score_DRB1*01:01'], result_df.loc[2, 'Score_DRB1*01:01'])
+        # Strong binders (seq1) should have lower scores than weak binders (seq3)
+        self.assertLess(result_df.loc[0, 'Score_DRB1*01:01'], result_df.loc[2, 'Score_DRB1*01:01'])
     
     def test_compute_immunogenicity_scores_empty_df(self):
         """Test immunogenicity score computation with empty DataFrame."""
@@ -138,8 +138,8 @@ class TestImmunogenicityOptimizer(unittest.TestCase):
         # Create test data with identical ranks
         df = pd.DataFrame({
             'sequence_id': ['seq1', 'seq2', 'seq3'],
-            'Rank_DRB1*01:01': [5, 5, 5],
-            'Rank_DRB1*03:01': [3, 3, 3]
+            'IC50_DRB1*01:01': [100.0, 100.0, 100.0],
+            'IC50_DRB1*03:01': [200.0, 200.0, 200.0]
         })
         
         result_df = self.optimizer.compute_immunogenicity_scores(df)
@@ -245,36 +245,43 @@ class TestMockPipeline(unittest.TestCase):
             output_dir="test_results"
         )
     
-    @patch('tools.epitope_predictor.identify_epitopes')
-    @patch('tools.protein_mpnn_wrapper.generate_mutants')
-    @patch('tools.netmhcii_runner.evaluate_mhc_affinity')
-    @patch('tools.alphafold3_runner.predict_structure_and_score')
-    def test_mock_pipeline_run(self, mock_af3, mock_mhc, mock_mpnn, mock_epitopes):
+    @patch('immunogenicity_optimization_pipeline.predict_structure')
+    @patch('immunogenicity_optimization_pipeline.evaluate_mhc_affinity')
+    @patch.object(ImmunogenicityOptimizer, '_write_mutated_epitope_fasta')
+    @patch.object(ImmunogenicityOptimizer, 'generate_mutant_sequences')
+    @patch.object(ImmunogenicityOptimizer, 'predict_epitopes')
+    def test_mock_pipeline_run(self, mock_epitopes, mock_mutants, mock_epitope_fasta,
+                               mock_mhc, mock_af3):
         """Test pipeline run with mocked dependencies."""
         import pandas as pd
         
         # Mock return values
         mock_epitopes.return_value = pd.DataFrame({
-            'peptide': ['MKLLVLGC', 'GCTAGCTA'],
-            'start_position': [1, 10],
-            'end_position': [8, 17],
-            'score': [0.8, 0.6]
+            'sequence': ['AAAAAA', 'BBBBBB'],
+            'start': [1, 7],
+            'end': [6, 12]
         })
         
-        mock_mpnn.return_value = ['MKLLVLGCTAGCT', 'GCTAGCTTTCCGGA']
+        mock_mutants.return_value = ['AAAAAAAAAAAA', 'BBBBBBBBBBBB']
+        mock_epitope_fasta.return_value = (
+            'mock_epitopes.fasta',
+            {
+                'mutant_0000|epitope_0000': 'mutant_0000',
+                'mutant_0001|epitope_0001': 'mutant_0001'
+            }
+        )
         
         mock_mhc.return_value = pd.DataFrame({
-            'sequence_id': ['mutant_0000', 'mutant_0001'],
-            'Rank_DRB1*01:01': [1, 5],
-            'Rank_DRB1*03:01': [2, 4]
+            'Sequence_ID': ['mutant_0000|epitope_0000', 'mutant_0001|epitope_0001'],
+            'IC50_DRB1*01:01': [25.0, 400.0],
+            'IC50_DRB1*03:01': [30.0, 420.0]
         })
         
         mock_af3.return_value = pd.DataFrame({
             'sequence_id': ['mutant_0000', 'mutant_0001'],
-            'pdb_file': ['path1.pdb', 'path2.pdb'],
+            'pdb_path': ['path1.pdb', 'path2.pdb'],
             'confidence_score': [85.0, 75.0],
-            'rmsd': [1.5, 2.1],
-            'dockq': [0.3, 0.25]
+            'structure_length': [120, 118]
         })
         
         # Create optimizer
@@ -292,7 +299,7 @@ class TestMockPipeline(unittest.TestCase):
         
         # Verify mock calls
         mock_epitopes.assert_called_once()
-        mock_mpnn.assert_called_once()
+        mock_mutants.assert_called_once()
         mock_mhc.assert_called_once()
         mock_af3.assert_called_once()
 

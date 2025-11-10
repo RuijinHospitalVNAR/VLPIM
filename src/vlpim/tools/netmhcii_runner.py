@@ -280,7 +280,7 @@ def _parse_standard_format(lines: List[str]) -> pd.DataFrame:
     return pd.DataFrame(epitopes)
 
 
-def evaluate_mhc_affinity(mutant_file: str) -> pd.DataFrame:
+def evaluate_mhc_affinity(mutant_file: str, group_by: str = 'auto') -> pd.DataFrame:
     """
     Evaluate MHC-II binding affinity for mutant sequences.
     
@@ -308,34 +308,55 @@ def evaluate_mhc_affinity(mutant_file: str) -> pd.DataFrame:
         # Use the prediction function
         affinity_df = predict_epitopes_with_netmhcii(mutant_file, hla_alleles, output_dir)
         
-        # Group by sequence and calculate average scores
-        grouped_df = affinity_df.groupby('sequence').agg({
-            'score': 'mean',
-            'rank': 'mean'
-        }).reset_index()
+        # Determine grouping identifier
+        if group_by == 'seq_id':
+            id_column = 'seq_id' if 'seq_id' in affinity_df.columns else 'sequence'
+        elif group_by == 'sequence':
+            id_column = 'sequence'
+        else:
+            if 'seq_id' in affinity_df.columns and affinity_df['seq_id'].notna().any():
+                id_column = 'seq_id'
+            else:
+                id_column = 'sequence'
+        
+        label_column = 'Sequence_ID' if id_column == 'seq_id' else 'sequence'
+        affinity_df[id_column] = affinity_df[id_column].fillna(affinity_df['sequence'])
+        
+        sequence_lookup = affinity_df[[id_column, 'sequence']].drop_duplicates()
         
         # Add individual allele rank (percentile) scores
         pivot_rank_df = affinity_df.pivot_table(
-            index='sequence',
+            index=id_column,
             columns='allele',
             values='rank',
             fill_value=999
         ).reset_index()
-        # Rename columns to match expected format for rank
-        pivot_rank_df.columns = [f'Rank_{col}' if col != 'sequence' else col for col in pivot_rank_df.columns]
+        pivot_rank_df.columns = [
+            f'Rank_{col}' if col != id_column else label_column for col in pivot_rank_df.columns
+        ]
 
         # Add individual allele IC50 values
         pivot_ic50_df = affinity_df.pivot_table(
-            index='sequence',
+            index=id_column,
             columns='allele',
             values='ic50',
             fill_value=1e9
         ).reset_index()
-        # Rename columns to match expected format for IC50
-        pivot_ic50_df.columns = [f'IC50_{col}' if col != 'sequence' else col for col in pivot_ic50_df.columns]
+        pivot_ic50_df.columns = [
+            f'IC50_{col}' if col != id_column else label_column for col in pivot_ic50_df.columns
+        ]
 
         # Merge rank and IC50 wide tables
-        merged_df = pd.merge(pivot_rank_df, pivot_ic50_df, on='sequence', how='outer')
+        merged_df = pd.merge(pivot_rank_df, pivot_ic50_df, on=label_column, how='outer')
+        
+        if label_column == 'Sequence_ID':
+            merged_df = merged_df.merge(
+                sequence_lookup.rename(columns={id_column: 'Sequence_ID', 'sequence': 'Epitope_Sequence'}),
+                on='Sequence_ID',
+                how='left'
+            )
+        else:
+            merged_df = merged_df.rename(columns={'sequence': 'Epitope_Sequence'})
         
         logger.info("MHC-II evaluation completed")
         return merged_df

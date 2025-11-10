@@ -204,24 +204,34 @@ class ImmunogenicityOptimizer:
         score_columns = []
         mode = self.config.mode.value
         
-        for col in df.columns:
-            if col.startswith('IC50_'):
-                allele = col.replace('IC50_', '')
-                min_ic50, max_ic50 = df[col].min(), df[col].max()
+        ic50_columns = [col for col in df.columns if col.startswith('IC50_')]
+        if not ic50_columns:
+            self.logger.warning("No IC50 columns found for scoring")
+            return df
+        
+        for col in ic50_columns:
+            allele = col.replace('IC50_', '')
+            ic50_values = pd.to_numeric(df[col], errors='coerce')
+            ranks = ic50_values.rank(method='average')
+            min_rank = ranks.min()
+            max_rank = ranks.max()
+            denom = (max_rank - min_rank) if (max_rank - min_rank) != 0 else None
+            
+            if denom is None or pd.isna(denom):
+                df[f'Score_{allele}'] = self.config.neutral_score
+                self.logger.warning(f"Identical ranks for {allele}, using neutral score")
+            else:
+                # Rank-based normalization: map ranks to 0-100 (rank small -> lower value)
+                normalized = ((ranks - min_rank) / denom) * 100.0
                 
-                # Avoid division by zero
-                if max_ic50 == min_ic50:
-                    df[f'Score_{allele}'] = self.config.neutral_score
-                    self.logger.warning(f"Identical IC50 for {allele}, using neutral score")
+                if mode == 'reduce':
+                    # Reduce mode: strong binding (lower rank) should yield higher contribution after inversion
+                    df[f'Score_{allele}'] = 100.0 - normalized
                 else:
-                    if mode == 'reduce':
-                        # Lower IC50 (stronger binding) get lower scores for reduction
-                        df[f'Score_{allele}'] = 100 - ((df[col] - min_ic50) / (max_ic50 - min_ic50)) * 100
-                    else:  # enhance
-                        # Lower IC50 (stronger binding) get higher scores for enhancement
-                        df[f'Score_{allele}'] = ((df[col] - min_ic50) / (max_ic50 - min_ic50)) * 100
-                
-                score_columns.append(f'Score_{allele}')
+                    # Enhance mode: keep as-is so stronger binding produces smaller scores for minimization later
+                    df[f'Score_{allele}'] = normalized
+            
+            score_columns.append(f'Score_{allele}')
         
         # Add overall immunogenicity score (sum across alleles)
         if score_columns:
@@ -536,6 +546,44 @@ class ImmunogenicityOptimizer:
         
         return result_df
     
+    def _write_mutated_epitope_fasta(
+        self,
+        mutants: List[str],
+        epitope_df: pd.DataFrame
+    ) -> Tuple[str, Dict[str, str]]:
+        """
+        Build a FASTA file containing mutated epitope peptides extracted
+        from each mutant sequence. Returns the FASTA path and a mapping
+        from per-epitope identifiers to their parent mutant IDs.
+        """
+        if not mutants or epitope_df.empty:
+            raise ValueError("Mutants or epitope definitions missing for epitope FASTA export")
+        
+        fasta_path = os.path.join(self.config.output_dir, "mutant_epitopes.fasta")
+        seq_id_to_mutant: Dict[str, str] = {}
+        
+        with open(fasta_path, 'w') as fasta_file:
+            for mutant_idx, sequence in enumerate(mutants):
+                mutant_id = f"mutant_{mutant_idx:04d}"
+                
+                for ep_idx, row in epitope_df.iterrows():
+                    start = int(row.get('start', 1)) - 1
+                    end = int(row.get('end', start))
+                    
+                    if start < 0 or end > len(sequence):
+                        self.logger.warning(
+                            f"Epitope [{row.get('start')}-{row.get('end')}] exceeds bounds for {mutant_id}, skipping"
+                        )
+                        continue
+                    
+                    peptide = sequence[start:end]
+                    seq_id = f"{mutant_id}|epitope_{ep_idx:04d}"
+                    fasta_file.write(f">{seq_id}\n{peptide}\n")
+                    seq_id_to_mutant[seq_id] = mutant_id
+        
+        self.logger.info(f"Mutated epitope FASTA saved to {fasta_path}")
+        return fasta_path, seq_id_to_mutant
+    
     def _get_full_sequence(self) -> str:
         """Get full protein sequence from FASTA file."""
         sequence = ""
@@ -547,6 +595,38 @@ class ImmunogenicityOptimizer:
         if not sequence:
             raise ValueError("Empty sequence read from FASTA file")
         return sequence
+    
+    def _aggregate_epitope_scores_by_mutant(
+        self,
+        epitope_scores: pd.DataFrame,
+        seq_id_map: Dict[str, str],
+        mutant_sequence_map: Dict[str, str]
+    ) -> pd.DataFrame:
+        """
+        Aggregate per-epitope scores (Sequence_ID level) into per-mutant totals.
+        """
+        if epitope_scores.empty or 'Sequence_ID' not in epitope_scores.columns:
+            return epitope_scores
+        
+        df = epitope_scores.copy()
+        df['Mutant_ID'] = df['Sequence_ID'].map(seq_id_map).fillna('unknown')
+        df['Epitope_Count'] = 1
+        
+        agg_dict: Dict[str, str] = {
+            'Overall_Immunogenicity_Score': 'sum',
+            'Epitope_Count': 'sum'
+        }
+        for col in df.columns:
+            if col.startswith('Score_'):
+                agg_dict[col] = 'mean'
+            if col.startswith('IC50_'):
+                agg_dict[col] = 'mean'
+        
+        grouped = df.groupby('Mutant_ID').agg(agg_dict).reset_index()
+        grouped = grouped.rename(columns={'Mutant_ID': 'Sequence_ID'})
+        grouped['sequence'] = grouped['Sequence_ID'].map(mutant_sequence_map).fillna('')
+        
+        return grouped
     
     def generate_mutant_sequences(self, epitope_df: pd.DataFrame) -> List[str]:
         """Generate mutant sequences using ProteinMPNN."""
@@ -579,12 +659,17 @@ class ImmunogenicityOptimizer:
             self.logger.error(f"Mutant generation failed: {e}")
             raise
     
-    def evaluate_mhc_binding(self, mutant_file: str) -> pd.DataFrame:
+    def evaluate_mhc_binding(
+        self,
+        mutant_file: str,
+        seq_id_map: Dict[str, str],
+        mutant_sequence_map: Dict[str, str]
+    ) -> pd.DataFrame:
         """Evaluate MHC-II binding affinity."""
         self.logger.info("Step 3: Evaluating MHC-II binding affinity...")
         
         try:
-            affinity_df = evaluate_mhc_affinity(mutant_file)
+            affinity_df = evaluate_mhc_affinity(mutant_file, group_by='seq_id')
             
             if affinity_df.empty:
                 raise ValueError("No MHC-II binding results obtained")
@@ -592,14 +677,25 @@ class ImmunogenicityOptimizer:
             # Compute immunogenicity scores
             affinity_df = self.compute_immunogenicity_scores(affinity_df)
             
-            # Save results
-            affinity_file = os.path.join(self.config.output_dir, "mhc_binding_scores.csv")
-            affinity_df.to_csv(affinity_file, index=False)
+            # Save per-epitope results
+            epitope_scores_file = os.path.join(self.config.output_dir, "mhc_binding_epitope_scores.csv")
+            affinity_df.to_csv(epitope_scores_file, index=False)
             
-            self.logger.info(f"Evaluated {len(affinity_df)} sequences for MHC-II binding")
+            # Aggregate to per-mutant scores
+            aggregated_df = self._aggregate_epitope_scores_by_mutant(
+                affinity_df,
+                seq_id_map,
+                mutant_sequence_map
+            )
+            
+            affinity_file = os.path.join(self.config.output_dir, "mhc_binding_scores.csv")
+            aggregated_df.to_csv(affinity_file, index=False)
+            
+            self.logger.info(f"Evaluated {len(affinity_df)} epitope sequences for MHC-II binding")
+            self.logger.info(f"Aggregated scores for {len(aggregated_df)} mutant sequences")
             self.logger.info(f"MHC binding scores saved to {affinity_file}")
             
-            return affinity_df
+            return aggregated_df
             
         except Exception as e:
             self.logger.error(f"MHC-II evaluation failed: {e}")
@@ -743,8 +839,15 @@ class ImmunogenicityOptimizer:
             # Run pipeline steps
             epitope_df = self.predict_epitopes()
             mutants = self.generate_mutant_sequences(epitope_df)
-            mutant_file = os.path.join(self.config.output_dir, "mutant_sequences.fasta")
-            affinity_df = self.evaluate_mhc_binding(mutant_file)
+            
+            mutant_sequence_map = {f"mutant_{i:04d}": seq for i, seq in enumerate(mutants)}
+            epitope_fasta, seq_id_map = self._write_mutated_epitope_fasta(mutants, epitope_df)
+            
+            affinity_df = self.evaluate_mhc_binding(
+                epitope_fasta,
+                seq_id_map,
+                mutant_sequence_map
+            )
             final_results = self.predict_structures_and_rank(affinity_df)
             
             # Calculate runtime
@@ -757,6 +860,7 @@ class ImmunogenicityOptimizer:
             self.logger.info("Results saved in ./results directory:")
             self.logger.info("  - epitope_predictions.csv")
             self.logger.info("  - mutant_sequences.fasta")
+            self.logger.info("  - mhc_binding_epitope_scores.csv")
             self.logger.info("  - mhc_binding_scores.csv")
             self.logger.info("  - final_ranked_candidates.csv")
             self.logger.info("  - config.json")

@@ -60,3 +60,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced visualization capabilities
 - Performance optimizations
 - Additional output formats
+
+---
+
+## [1.0.1] - 2025-01-XX
+
+### Added
+- Comprehensive installation guide (INSTALLATION_GUIDE.md)
+- External tools policy document (EXTERNAL_TOOLS_POLICY.md)
+- Enhanced contributing guidelines with detailed examples
+
+### Changed
+- **README.md**: Major documentation overhaul
+  - Added Table of Contents (TOC) for easy navigation
+  - Enhanced Quick Start section with clear installation steps
+  - Added detailed Troubleshooting section with common issues and solutions
+  - Expanded Examples section with multiple use cases
+  - Added Tips for Optimization section
+  - Improved Output Format documentation
+  - Better structured Acknowledgments and Citation sections
+  - Added comprehensive Important Notes section
+
+- **CONTRIBUTING.md**: Enhanced contributor guidelines
+  - Added Table of Contents
+  - Expanded coding standards with examples
+  - Added detailed testing guidelines
+  - Improved documentation guidelines
+  - Enhanced Pull Request process with templates
+  - Added external tool integration guidelines
+
+### Documentation
+- Improved documentation structure following best practices
+- Added cross-references between documents
+- Enhanced code examples and usage patterns
+- Better organized troubleshooting information
